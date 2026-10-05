@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>csv-chart-gen</title>
+<style>
+  body{font-family:-apple-system,"PingFang SC",sans-serif;max-width:900px;margin:24px auto;padding:0 16px;color:#222}
+  h1{font-size:20px}
+  textarea{width:100%;height:120px;font-family:monospace;font-size:13px;padding:8px;box-sizing:border-box}
+  .row{margin:10px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  button{padding:6px 14px;cursor:pointer}
+  svg{border:1px solid #eee;margin-top:10px}
+</style>
+</head>
+<body>
+<h1>CSV → 图表</h1>
+<p>粘贴 CSV（首行为表头），选择列与图型即可绘图。纯前端，零依赖。</p>
+<textarea id="csv">月份,销售额,利润
+1月,120,30
+2月,200,55
+3月,150,40
+4月,300,90
+5月,260,70</textarea>
+<div class="row">
+  <button id="draw">绘制</button>
+  <label>图型：
+    <select id="chartType">
+      <option value="bar">柱状图</option>
+      <option value="line">折线图</option>
+      <option value="pie">饼图</option>
+    </select>
+  </label>
+  <label>类别列：<select id="catCol"></select></label>
+  <label>数值列：<select id="valCol"></select></label>
+</div>
+<div id="viz"></div>
+
+<script>
+function parseCSV(text){
+  const lines = text.trim().split(/\r?\n/).filter(l=>l.trim().length);
+  const headers = lines[0].split(",").map(h=>h.trim());
+  const rows = [];
+  for(let i=1;i<lines.length;i++){
+    const cells = lines[i].split(",").map(c=>c.trim());
+    const row = {};
+    headers.forEach((h,idx)=>row[h]=cells[idx]);
+    rows.push(row);
+  }
+  return {headers, rows};
+}
+
+let DATA = null;
+function refreshSelectors(){
+  const {headers, rows} = parseCSV(document.getElementById('csv').value);
+  DATA = {headers, rows};
+  const cat = document.getElementById('catCol');
+  const val = document.getElementById('valCol');
+  cat.innerHTML=''; val.innerHTML='';
+  headers.forEach(h=>{
+    cat.innerHTML += `<option>${h}</option>`;
+    val.innerHTML += `<option>${h}</option>`;
+  });
+  if(headers.length>1) val.selectedIndex = 1;
+}
+
+function aggregate(catCol, valCol){
+  const map = {};
+  DATA.rows.forEach(r=>{
+    const k = r[catCol];
+    const v = parseFloat(r[valCol])||0;
+    map[k] = (map[k]||0) + v;
+  });
+  return Object.entries(map).map(([k,v])=>({label:k, value:v}));
+}
+
+function draw(){
+  refreshSelectors();
+  const type = document.getElementById('chartType').value;
+  const catCol = document.getElementById('catCol').value;
+  const valCol = document.getElementById('valCol').value;
+  const pts = aggregate(catCol, valCol);
+  document.getElementById('viz').innerHTML = renderSVG(pts, type);
+}
+
+function renderSVG(pts, type){
+  const W=800, H=400, pad=40;
+  const max = Math.max(...pts.map(p=>p.value), 1);
+  let shapes = '';
+  if(type==='bar'){
+    const bw = (W-2*pad)/pts.length;
+    pts.forEach((p,i)=>{
+      const h = (p.value/max)*(H-2*pad);
+      const x = pad + i*bw + 4;
+      const y = H - pad - h;
+      shapes += `<rect x="${x}" y="${y}" width="${bw-8}" height="${h}" fill="#4a90d9"><title>${p.label}:${p.value}</title></rect>`;
+      shapes += `<text x="${x}" y="${H-pad+16}" font-size="11">${p.label}</text>`;
+    });
+  } else if(type==='line'){
+    let path = '';
+    pts.forEach((p,i)=>{
+      const x = pad + (W-2*pad)*(i/Math.max(pts.length-1,1));
+      const y = H - pad - (p.value/max)*(H-2*pad);
+      path += (i===0?`M${x},${y}`:` L${x},${y}`);
+      shapes += `<circle cx="${x}" cy="${y}" r="3" fill="#d94a4a"/>`;
+    });
+    shapes = `<path d="${path}" stroke="#d94a4a" fill="none" stroke-width="2"/>` + shapes;
+  } else {
+    let start = -Math.PI/2;
+    const total = pts.reduce((s,p)=>s+p.value,0)||1;
+    const cx=W/2, cy=H/2, r=130;
+    const colors=['#4a90d9','#d94a4a','#5cb85c','#f0ad4e','#9b59b6','#1abc9c'];
+    pts.forEach((p,i)=>{
+      const ang = p.value/total*2*Math.PI;
+      const end = start+ang;
+      const x1=cx+r*Math.cos(start), y1=cy+r*Math.sin(start);
+      const x2=cx+r*Math.cos(end), y2=cy+r*Math.sin(end);
+      shapes += `<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${ang>Math.PI?1:0},1 ${x2},${y2} Z" fill="${colors[i%colors.length]}"><title>${p.label}:${p.value}</title></path>`;
+      start = end;
+    });
+  }
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${shapes}</svg>`;
+}
+
+document.getElementById('draw').addEventListener('click', draw);
+refreshSelectors(); draw();
+
+if(typeof module!=='undefined'){ module.exports = {parseCSV, aggregate}; }
+</script>
+</body>
+</html>
